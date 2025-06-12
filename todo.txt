@@ -1,0 +1,16 @@
+ML design
+
+1. uses random forest algorthim, works well against overfitting and noisy data ()
+2. retrain entire ML using ALL historical data (until old data becomes stale)
+3. batch the training to every wk or so? 
+    - training on data where joints dont hurt is relevant 
+    - training on data where joints DO hurt is releveanter
+4. pain modeling
+    - pain usually lasts for entire duration of THAT day
+    - system that pings? before EOD (at a random time? at 7pm? let them choose?) asking for pain level
+    - do another ping the NEXT day (early morning? mid afternoon? 12pm?) if pain still there
+    - if pain is still there , ask to rate. 
+    - REPEAT, PING BEFORE EOD, PING NEXT DAY .... INFINITE LOOP IF PAIN
+        - NO PAIN = NO PING
+        
+
