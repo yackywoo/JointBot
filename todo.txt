@@ -1,4 +1,12 @@
-ML design
+1. double check all the newly added functions
+2. add working ML algorithim that reads pain_level and writes forecasted_pain to data.csv
+3. integrate the ML into WeatherHandler.py 
+4. clean up WeatherHandler code
+5. finally integrate everything into main.py - the Discord Bot 
+
+
+--------------------------
+ML design thoughts
 
 1. uses random forest algorthim, works well against overfitting and noisy data ()
 2. retrain entire ML using ALL historical data (until old data becomes stale)

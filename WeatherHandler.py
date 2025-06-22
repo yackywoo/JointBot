@@ -4,6 +4,16 @@ from datetime import datetime, timedelta
 import helper_funcs
 import os
 
+conditions = [
+                "temperature_2m", "relative_humidity_2m", "dew_point_2m",
+                "apparent_temperature", "precipitation_probability", "precipitation",
+                "rain", "showers", "snowfall", "snow_depth", "weather_code",
+                "pressure_msl", "surface_pressure", "cloud_cover", "cloud_cover_low",
+                "cloud_cover_mid", "cloud_cover_high", "visibility",
+                "evapotranspiration", "et0_fao_evapotranspiration",
+                "vapour_pressure_deficit"
+            ]
+
 class WeatherHandler:
     """
     Encapsulates weather data fetching, initialization of the data store,
@@ -15,7 +25,7 @@ class WeatherHandler:
         if os.path.isfile(csv_path) == False:
             self.init_data()
 
-    def get_weather(self):
+    def get_weather(self, past:str, future:str):
         """Fetches hourly weather data from the Open-Meteo API."""
         config = helper_funcs.get_config()
         if config is None:
@@ -25,18 +35,10 @@ class WeatherHandler:
         params = {
             "latitude": config['lat'],
             "longitude": config['log'],
-            "hourly": ",".join([
-                "temperature_2m", "relative_humidity_2m", "dew_point_2m",
-                "apparent_temperature", "precipitation_probability", "precipitation",
-                "rain", "showers", "snowfall", "snow_depth", "weather_code",
-                "pressure_msl", "surface_pressure", "cloud_cover", "cloud_cover_low",
-                "cloud_cover_mid", "cloud_cover_high", "visibility",
-                "evapotranspiration", "et0_fao_evapotranspiration",
-                "vapour_pressure_deficit"
-            ]),
+            "hourly": ",".join(conditions),
             "timezone": config['timezone'],
-            "start_date": "2025-05-21",
-            "end_date": "2025-05-25"
+            "start_date": f"{past}",
+            "end_date": f"{future}"
         }
 
         response = requests.get(url, params=params)
@@ -44,16 +46,21 @@ class WeatherHandler:
 
     def init_data(self):
         """Initializes the CSV file with weather data and a placeholder pain_level column."""
-        data = self.get_weather()
-        cols = list(data['hourly'].keys())
-        cols.insert(1, "pain_level")
+        today = datetime.now()
+        today_date = today.date()
+        next_week = today_date + timedelta(days=7)
+        
+        # data = self.get_weather(str(today_date),str(next_week)) #this is correct
+        data = self.get_weather(str('2025-05-21'),str(next_week))
+        custom_data = self.add_columns(data)
+        custom_data.to_csv(self.csv_path)
 
-        df = pd.DataFrame(columns=cols)
-        for category, values in data['hourly'].items():
-            df[category] = values
-        df['pain_level'] = 0.0
+        #adds to config.json, previous_time = today at current time
+        today_str = self._clean_timestamp(str(today))
+        # helper_funcs.append_config('previous_time',str(today_str)) #correct
+        helper_funcs.append_config('previous_time','2025-05-21 10:00:00') #delete this later
+        self.check_and_add()
 
-        df.set_index('time').to_csv(self.csv_path)
         print(f"{self.csv_path} initalized")
 
     def _clean_timestamp(self, timestamp: str) :
@@ -90,39 +97,39 @@ class WeatherHandler:
         - Otherwise, simply logs the pain_level at timestamp.
         """
         df = pd.read_csv(self.csv_path, index_col='time', parse_dates=['time'])
+        
+        start_idx = df.index.get_loc(prev_timestamp)
         end_idx = df.index.get_loc(timestamp)
 
-        if prev_timestamp:
-            start_idx = df.index.get_loc(prev_timestamp)
-            d1 = datetime.fromisoformat(prev_timestamp)
-            d2 = datetime.fromisoformat(str(timestamp))
-            delta = d2 - d1
+        d1 = datetime.fromisoformat(prev_timestamp)
+        d2 = datetime.fromisoformat(str(timestamp))
+        delta = d2 - d1
+        
+        #only needed when backfilling / interpolating
+        prev_pain = df.iloc[start_idx]['pain_level']
 
-            prev_pain = df.iloc[start_idx]['pain_level']
-
-            if delta.days > 0:
-                # Fill prev_timestamp's day for same pain_level
-                eod = prev_timestamp[:-5] + "23:00"
-                eod_idx = df.index.get_loc(eod) + 1
-                df.iloc[start_idx:eod_idx, df.columns.get_loc('pain_level')] = prev_pain
-                # Log new pain_level
-                df.iloc[end_idx, df.columns.get_loc('pain_level')] = pain_level
-                print(f"Pain backfilled for [{eod} at {float(prev_pain)}]")
-            else:
-                # Interpolate linearly between prev and current
-                step = self._normalize_pain(prev_pain, pain_level, start_idx, end_idx)
-                for i in range(start_idx, end_idx + 1):
-                    df.iloc[i, df.columns.get_loc('pain_level')] = round(
-                        prev_pain - (step * (i - start_idx)), 1
-                    )
-                print(f"Pain logged from [{prev_timestamp} @ {prev_pain}] to [{timestamp} at {float(pain_level)}]")
-            helper_funcs.append_config('previous_time', str(timestamp))
-        else:
-            # First-ever log entry
+        if start_idx == end_idx : 
+            df.iloc[start_idx, df.columns.get_loc('pain_level')] = pain_level
+            print(f"Pain logged for [{timestamp} @ {float(pain_level)}]")
+        elif delta.days > 0:
+            # Fill prev_timestamp's day for same pain_level (end abruptly prev time at EOD)
+            eod = prev_timestamp[:-8] + "23:00:00"
+            eod_idx = df.index.get_loc(eod) 
+            df.iloc[start_idx:(eod_idx+1), df.columns.get_loc('pain_level')] = prev_pain
+            # Log new pain_level
             df.iloc[end_idx, df.columns.get_loc('pain_level')] = pain_level
-            helper_funcs.append_config('previous_time', str(timestamp))
-            print(f"FIRST - Pain logged at [{timestamp} at {float(pain_level)}]")
+            print(f"Pain backfilled for [{eod} @ {float(prev_pain)}] AND logged for [{timestamp} @ {float(pain_level)}]")
 
+        else:
+            # Interpolate linearly between prev and current
+            step = self._normalize_pain(prev_pain, pain_level, start_idx, end_idx)
+            for i in range(start_idx, end_idx + 1):
+                df.iloc[i, df.columns.get_loc('pain_level')] = round(
+                    prev_pain - (step * (i - start_idx)), 1
+                )
+            print(f"Pain logged from [{prev_timestamp} @ {prev_pain}] to [{timestamp} @ {float(pain_level)}]")
+     
+        helper_funcs.append_config('previous_time', str(timestamp))
         df.to_csv(self.csv_path)
 
     def _normalize_pain(self, prev_pain: float, curr_pain: float, start_idx: int, end_idx: int) -> float:
@@ -133,6 +140,148 @@ class WeatherHandler:
         hours = end_idx - start_idx
         return 0 if hours == 0 else (prev_pain - curr_pain) / hours
 
-handler = WeatherHandler()
-handler.log_pain('2025-05-24T12:00', 7)
 
+
+
+#added     
+    def add_columns(self, data) : 
+        cols = list(data['hourly'].keys())
+        cols.insert(1, "pain_level")
+        cols.insert(2, "predicted_pain")
+        cols.insert(3, "is_actual")
+
+        df = pd.DataFrame(columns=cols)
+        for category, values in data['hourly'].items():
+            df[category] = values
+
+        df['pain_level'] = 0.0
+        df['predicted_pain'] = 0.0
+        df['is_actual'] = False
+        df['time'] = pd.to_datetime(df['time'])
+
+        return df.set_index('time')
+    
+    def _update_features(self, new_features, time) :
+        #new_features = raw weather data, json object
+        #time = index to stop at
+        new_forecast = self.add_columns(new_features)
+        current_data = pd.read_csv(self.csv_path, index_col='time', parse_dates=['time'])
+        
+        '''
+        get overlapping indices of current_data (from data.csv) 
+        and new_forceast (API call for next week's data)
+
+        then overwrite current_data's conditions (default columns, excludes my additional cols)
+        with new_forecast's updated weather conditions
+        '''
+        overlap = current_data.index.intersection(new_forecast.index)
+        current_data.loc[overlap, conditions] = new_forecast.loc[overlap, conditions]
+       
+        '''
+        update values for 'is_actual' column from [prev_update_day @ 12AM, todays_date @ AM/PM] to be TRUE
+        '''
+        start = overlap[0]
+        end = time
+        current_data.loc[start:end, 'is_actual'] = True
+
+        '''
+        this is all new, relative to [current_data]
+
+        get disjoint set of indices from new_forecast (=new_indices)
+        then use those new_indices to copy new_forecast's values (=new_rows)
+        finally append those new_rows onto our current_data (=updated_data)
+        '''
+        #there shouldn't be new rows, but if there are, its handled gracefully
+        new_indices = new_forecast.index.difference(current_data.index) #bunch of timedate objects
+        new_rows = new_forecast.loc[new_indices] 
+        
+        updated_data = pd.concat([current_data, new_rows])
+        updated_data = updated_data.sort_index()
+        updated_data.to_csv(self.csv_path)
+
+        print(f'Actuals updated from [{start}] to [{end}]')
+
+
+    #updates and adds weather data from range[start_date,end_date] into data.csv
+    def _update_forecast_range(self, start_date ,end_date) :
+        data = self.get_weather(str(start_date.date()), str(end_date.date()))
+
+        new_forecast = self.add_columns(data)
+        current_data = pd.read_csv(self.csv_path, index_col='time', parse_dates=['time'])
+        
+        '''
+        get overlapping indices of current_data (from data.csv) 
+        and new_forceast (API call for next week's data)
+
+        then overwrite current_data's conditions (default columns, excludes my additional cols)
+        with new_forecast's updated weather conditions
+        '''
+        overlap = current_data.index.intersection(new_forecast.index)
+        current_data.loc[overlap, conditions] = new_forecast.loc[overlap, conditions]
+
+        #update 'is_actual' to be true up until NOW 
+        now = self._clean_timestamp(str(datetime.now()))
+        start = overlap[0]
+        current_data.loc[start:now, 'is_actual'] = True
+
+        '''
+        this is all new, relative to [current_data]
+
+        get disjoint set of indices from new_forecast (=new_indices)
+        then use those new_indices to copy new_forecast's values (=new_rows)
+        finally append those new_rows onto our current_data
+        '''
+        new_indices = new_forecast.index.difference(current_data.index) #bunch of timedate objects
+        new_rows = new_forecast.loc[new_indices] 
+
+        updated_data = pd.concat([current_data, new_rows])
+        updated_data = updated_data.sort_index()
+        # updated_data.to_csv(self.csv_path)
+
+        print(f'Actuals updated from [{str(start_date.date())}] to [{end_date.date()}]')
+
+    #updates range[previous_time (in config.json) : ceiling(current_day_time)] weather data
+    #difference is this one stops at a specific hour ? redundant?
+    def _update_forecast_hour(self, current_time) : 
+        prev_update_time = helper_funcs.get_config()['previous_time']
+                
+        prev_date = prev_update_time[0:10]
+        curr_date = str(current_time.date())
+
+        data = self.get_weather(prev_date, curr_date)
+        self._update_features(data, current_time)
+
+
+
+    def check_and_add(self) :
+        now_ts = self._clean_timestamp(str(datetime.now()))
+        hour = int(now_ts.hour)
+        
+        #actuals update midday - triggers when pain is logged (higher precedence)
+        if hour == hour :
+            #look intraday, update by the hour
+            self._update_forecast_hour(now_ts)
+            print(f'Hourly update routine finished at [{datetime.now()}]')
+        #day just ended - update actuals for prev day & get forecast for next week
+        if hour == 0 :
+            yesterday = now_ts - timedelta(days=1)
+            self._update_forecast_range(yesterday, yesterday)
+            print(f'Daily update routine finished at [{datetime.now()}]')
+
+            next_week = now_ts + timedelta(days=7)
+            self._update_forecast_range(now_ts, next_week)
+            print(f'Weekly update routine finished at [{datetime.now()}]')
+
+            #do weekly update as well
+            #run ML alg on non-actual's data?
+            #so update next weeks weather forecast then update pain forecast?
+
+
+
+handler=WeatherHandler()
+# handler.log_pain('2025-05-21 10:00:00', 5.0) #-> this is getting backfilled at 0 for the day, need to correct the logic
+# handler.log_pain('2025-05-25 10:00:00', 5.0)
+# handler.log_pain('2025-05-30 15:00:00', 5.0)
+handler.log_pain('2025-06-16 15:00:00', 7.0)
+handler.log_pain('2025-06-16 20:00:00', 9.0)
+handler.check_and_add()

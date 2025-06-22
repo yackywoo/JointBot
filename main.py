@@ -2,14 +2,14 @@ import discord
 from discord.ext import commands
 from discord import app_commands
 import logging
-from dotenv import load_dotenv
-import os
 import asyncio
 import helper_funcs
+import WeatherHandler
 
-
+#init objects + grab .env variables
 token, guild = helper_funcs.load_env()
 guild_id=discord.Object(id=guild)
+weatherBot=WeatherHandler.WeatherHandler()
 
 #set logging and intents (permissions)
 handler = logging.FileHandler(filename='discord.log', encoding='utf-8', mode='w')
@@ -32,8 +32,6 @@ class PainLevelSelect(discord.ui.Select):
         updated_pain = self.values[0]
         await handle_pain(interaction, int(updated_pain))
         await interaction.message.delete()
-
-
 
 class PainLevelView(discord.ui.View) :
     def __init__(self,timeout=1) : 
@@ -121,9 +119,12 @@ async def handle_pain(interaction: discord.Interaction, pain_level: int) :
             date = now.date()
             hour = now.hour
             minute = now.minute
-            pain_log = str(date)+"T"+str(hour)+":00"
+            pain_log = str(date)+"T"+str(hour)+":"+str(minute)+":00"
             await interaction.response.send_message(f"🤕 - Pain level of {emojis[pain_level]} recorded at {str(date)} {str(hour)}:{str(minute)} by {interaction.user.mention}")
             
+            #
+            weatherBot.log_pain(pain_log, pain_level)
+
             bot.loop.create_task(send_followup(interaction, pain_level))
 
 

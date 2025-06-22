@@ -69,6 +69,3 @@ def get_config() :
             return json_object
     except json.JSONDecodeError:
         return None
-
-# set_local_info(fetch_local_info("11249", "US"))
-# print(get_local_info())
