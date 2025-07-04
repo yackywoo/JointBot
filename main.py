@@ -68,7 +68,7 @@ async def local (interaction: discord.Interaction, zip_or_city: str, country: st
 async def location (interaction: discord.Interaction) :
     info = helper_funcs.get_config()
     if info is None :
-        await interaction.responsse.send_message("Use '/local' to set location information first")
+        await interaction.response.send_message("Use '/local' to set location information first")
     else :
         zipOrCity = info['zipOrCity']
         country = info['country']
@@ -106,6 +106,15 @@ async def pain (interaction: discord.Interaction, pain_level: int) :
     await handle_pain(interaction, pain_level)
 
 
+@bot.tree.command(name="check", description="Displays next week's max forecasted pain level", guild=guild_id)
+async def pain (interaction: discord.Interaction) : 
+    forecast = weatherBot.get_forecast()
+    msg = "\n**Pain Forecast - Next Week:**\n```"    
+    for date, maxpain in forecast.items() :
+        msg += f"{date} : {emojis[maxpain]}\n"
+    msg += "```"
+    await interaction.response.send_message(msg)
+
 async def handle_pain(interaction: discord.Interaction, pain_level: int) : 
     info = helper_funcs.get_config()
     if info is None :
@@ -122,9 +131,7 @@ async def handle_pain(interaction: discord.Interaction, pain_level: int) :
             pain_log = str(date)+"T"+str(hour)+":"+str(minute)+":00"
             await interaction.response.send_message(f"🤕 - Pain level of {emojis[pain_level]} recorded at {str(date)} {str(hour)}:{str(minute)} by {interaction.user.mention}")
             
-            #
             weatherBot.log_pain(pain_log, pain_level)
-
             bot.loop.create_task(send_followup(interaction, pain_level))
 
 

@@ -3,6 +3,8 @@ import pandas as pd
 from datetime import datetime, timedelta
 import helper_funcs
 import os
+import joblib
+import ml
 
 conditions = [
                 "temperature_2m", "relative_humidity_2m", "dew_point_2m",
@@ -20,8 +22,9 @@ class WeatherHandler:
     and logging of user-reported pain levels alongside the weather data.
     """
 
-    def __init__(self, csv_path='data.csv'):
+    def __init__(self, csv_path='data.csv', pain_model='pain_model.pkl'):
         self.csv_path = csv_path
+        self.pain_model = pain_model
         if os.path.isfile(csv_path) == False:
             self.init_data()
 
@@ -49,17 +52,15 @@ class WeatherHandler:
         today = datetime.now()
         today_date = today.date()
         next_week = today_date + timedelta(days=7)
-        
-        # data = self.get_weather(str(today_date),str(next_week)) #this is correct
-        data = self.get_weather(str('2025-05-21'),str(next_week))
+
+        data = self.get_weather(str(today_date),str(next_week))
         custom_data = self.add_columns(data)
-        custom_data.to_csv(self.csv_path)
+        custom_data.to_csv(self.csv_path, index_label='time')
 
         #adds to config.json, previous_time = today at current time
         today_str = self._clean_timestamp(str(today))
-        # helper_funcs.append_config('previous_time',str(today_str)) #correct
-        helper_funcs.append_config('previous_time','2025-05-21 10:00:00') #delete this later
-        self.check_and_add()
+        helper_funcs.append_config('previous_time',str(today_str)) #correct
+        self.routine()
 
         print(f"{self.csv_path} initalized")
 
@@ -89,7 +90,7 @@ class WeatherHandler:
         config = helper_funcs.get_config()
         return config.get('previous_time') if config and 'previous_time' in config else None
 
-    def update_pain(self, timestamp: str, pain_level: float, prev_timestamp: str = None):
+    def update_pain(self, timestamp: str, pain_level: float, prev_timestamp: str):
         """
         Updates the CSV:
         - If prev_timestamp exists, fills in the pain_level from prev_timestamp to timestamp,
@@ -140,10 +141,6 @@ class WeatherHandler:
         hours = end_idx - start_idx
         return 0 if hours == 0 else (prev_pain - curr_pain) / hours
 
-
-
-
-#added     
     def add_columns(self, data) : 
         cols = list(data['hourly'].keys())
         cols.insert(1, "pain_level")
@@ -180,7 +177,7 @@ class WeatherHandler:
         '''
         update values for 'is_actual' column from [prev_update_day @ 12AM, todays_date @ AM/PM] to be TRUE
         '''
-        start = overlap[0]
+        start = current_data.index[0]
         end = time
         current_data.loc[start:end, 'is_actual'] = True
 
@@ -221,7 +218,7 @@ class WeatherHandler:
 
         #update 'is_actual' to be true up until NOW 
         now = self._clean_timestamp(str(datetime.now()))
-        start = overlap[0]
+        start = current_data.index[0]
         current_data.loc[start:now, 'is_actual'] = True
 
         '''
@@ -236,7 +233,7 @@ class WeatherHandler:
 
         updated_data = pd.concat([current_data, new_rows])
         updated_data = updated_data.sort_index()
-        # updated_data.to_csv(self.csv_path)
+        updated_data.to_csv(self.csv_path)
 
         print(f'Actuals updated from [{str(start_date.date())}] to [{end_date.date()}]')
 
@@ -251,37 +248,76 @@ class WeatherHandler:
         data = self.get_weather(prev_date, curr_date)
         self._update_features(data, current_time)
 
-
-
-    def check_and_add(self) :
+    def routine(self) :
         now_ts = self._clean_timestamp(str(datetime.now()))
         hour = int(now_ts.hour)
         
         #actuals update midday - triggers when pain is logged (higher precedence)
-        if hour == hour :
-            #look intraday, update by the hour
-            self._update_forecast_hour(now_ts)
-            print(f'Hourly update routine finished at [{datetime.now()}]')
+        # if hour == hour :
+        #     #look intraday, update by the hour
+        #     self._update_forecast_hour(now_ts)
+        #     print(f'Hourly update routine finished at [{datetime.now()}]')
         #day just ended - update actuals for prev day & get forecast for next week
-        if hour == 0 :
+        if hour == hour :
             yesterday = now_ts - timedelta(days=1)
             self._update_forecast_range(yesterday, yesterday)
             print(f'Daily update routine finished at [{datetime.now()}]')
 
             next_week = now_ts + timedelta(days=7)
-            self._update_forecast_range(now_ts, next_week)
+            #update next weeks forecast data then predict pain 
+            self._update_forecast_range(now_ts, next_week) 
+            self.model_pain(False)
             print(f'Weekly update routine finished at [{datetime.now()}]')
 
             #do weekly update as well
             #run ML alg on non-actual's data?
             #so update next weeks weather forecast then update pain forecast?
 
+    def model_pain(self, is_actual:bool) : 
+        try :
+            model = joblib.load(self.pain_model)
+            print(f"Loaded model : {self.pain_model}")  
+        except Exception as e: 
+            print(f"Model load error : {e}")
+            return
+        
+        try : 
+            forecast = ml.preprocess(self.csv_path, is_actual)
+            print(f"Preprocessed CSV : {self.csv_path}")
+        except Exception as e: 
+            print(f"Preprocess error : {e}")
+            return
+        
+        try :
+            features = forecast[model.feature_names_in_]
+        except Exception as e: 
+            print(f"Missing feature(s) : {e}")
+            return
 
 
-handler=WeatherHandler()
-# handler.log_pain('2025-05-21 10:00:00', 5.0) #-> this is getting backfilled at 0 for the day, need to correct the logic
-# handler.log_pain('2025-05-25 10:00:00', 5.0)
-# handler.log_pain('2025-05-30 15:00:00', 5.0)
-handler.log_pain('2025-06-16 15:00:00', 7.0)
-handler.log_pain('2025-06-16 20:00:00', 9.0)
-handler.check_and_add()
+        forecast['predicted_pain'] = model.predict(features)
+        forecast['predicted_pain'] = forecast['predicted_pain'].round(1).round()
+
+        df = pd.read_csv(self.csv_path, index_col='time', parse_dates=['time'])
+        indicies = df[df['is_actual']== is_actual].index
+        df.loc[indicies,'predicted_pain'] = forecast['predicted_pain'].values
+        df = df.sort_index()
+        df.to_csv(self.csv_path)
+
+    def get_forecast(self) : 
+        self.routine()
+        df = pd.read_csv(self.csv_path, index_col='time', parse_dates=['time'])
+
+        df = df[df['is_actual']==False]
+        df['date'] = df.index.normalize()
+        dates = df.index.normalize().unique()
+    
+        pain_forecast = {}
+
+        for date in dates : 
+            date = str(date)[0:10]
+            filtered = df[df['date']==date]
+            max_pain = filtered['predicted_pain'].max()
+            pain_forecast[date] = pain_forecast.get(date,int(max_pain))
+
+        return pain_forecast
