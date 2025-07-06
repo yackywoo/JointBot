@@ -52,20 +52,31 @@ def testmodel(x_test, y_test, model) :
         diff = round(actual-pred,2)
         min_diff = min(min_diff, diff)
         max_diff = max(max_diff, diff)
-        # print(f"Pred: {pred:.2f} | Act: {actual:.2f} | Diff = {diff}")
-    print(f"minΔ: {min_diff}\nmaxΔ: {max_diff}")
 
     mse = mean_squared_error(y_test, y_pred)
     r2  = r2_score(y_test, y_pred)
-    print(f"MSE: {mse:.3f}")
-    print(f"R² : {r2:.3f}")
+    # print(f"minΔ: {min_diff}\nmaxΔ: {max_diff}")
+    # print(f"MSE: {mse:.3f}")
+    # print(f"R² : {r2:.3f}")
+    
+    stats = {
+        'R2' : r2,
+        'MSE' : mse,
+        'Δ-MIN' : min_diff,
+        'Δ-MAX' : max_diff
+    }
+    return stats
 
-    if r2 >= 0.5 : 
-        joblib.dump(model, "pain_model.pkl")
+def get_stats(data) : 
+    processed_data = preprocess(data, True)
+    x_test, y_test, model = trainmodel(processed_data) 
+    stats = testmodel(x_test, y_test, model)
+    return stats
 
-
-# if __name__ == "__main__" : 
-#     processed_data = preprocess("data.csv", True) #prepreocess (Actuals == True) data
-#     x_test, y_test, model = trainmodel(processed_data) 
-#     testmodel(x_test, y_test, model)
-
+def update_model(data, model_name) : 
+    processed_data = preprocess(data, True)
+    x = get_features(processed_data)
+    y = get_labels(processed_data)
+    model = RandomForestRegressor(n_estimators=300, max_depth=15, random_state=42)
+    model.fit(x, y)
+    joblib.dump(model, model_name)

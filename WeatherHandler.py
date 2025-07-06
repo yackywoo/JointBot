@@ -1,9 +1,10 @@
 import requests
 import pandas as pd
 from datetime import datetime, timedelta
-import helper_funcs
 import os
 import joblib
+
+import helper_funcs
 import ml
 
 conditions = [
@@ -252,26 +253,28 @@ class WeatherHandler:
         now_ts = self._clean_timestamp(str(datetime.now()))
         hour = int(now_ts.hour)
         
-        #actuals update midday - triggers when pain is logged (higher precedence)
-        # if hour == hour :
-        #     #look intraday, update by the hour
-        #     self._update_forecast_hour(now_ts)
-        #     print(f'Hourly update routine finished at [{datetime.now()}]')
-        #day just ended - update actuals for prev day & get forecast for next week
+        # this runs when actuals for for current hour matter like pain log / forecasting 
+        if hour == hour :
+            self.intraday_routine(now_ts)
+        # # day just ended - update actuals for prev day & get forecast for next week
         if hour == hour :
             yesterday = now_ts - timedelta(days=1)
-            self._update_forecast_range(yesterday, yesterday)
-            print(f'Daily update routine finished at [{datetime.now()}]')
-
             next_week = now_ts + timedelta(days=7)
-            #update next weeks forecast data then predict pain 
-            self._update_forecast_range(now_ts, next_week) 
-            self.model_pain(False)
-            print(f'Weekly update routine finished at [{datetime.now()}]')
+            self.forecast_routine(yesterday, now_ts, next_week)
+    
+    def intraday_routine(self, time) : 
+        self._update_forecast_hour(time)
+        print(f'Intraday update finished at [{datetime.now()}]')
 
-            #do weekly update as well
-            #run ML alg on non-actual's data?
-            #so update next weeks weather forecast then update pain forecast?
+    def forecast_routine(self, past, now, future) : 
+        # update yesterdays actuals (weather)
+        self._update_forecast_range(past, past) 
+        # update next weeks forecast (weather)
+        self._update_forecast_range(now, future) 
+        # update next weeks forecast (pain) if painmodel exists
+        if os.path.isfile(self.pain_model) == True:
+            self.model_pain(False)
+        print(f'Forecast update finished at [{datetime.now()}]')
 
     def model_pain(self, is_actual:bool) : 
         try :
@@ -321,3 +324,9 @@ class WeatherHandler:
             pain_forecast[date] = pain_forecast.get(date,int(max_pain))
 
         return pain_forecast
+    
+    def see_stats(self) : 
+        return ml.get_stats(self.csv_path)
+    
+    def update_model(self) :
+        ml.update_model(self.csv_path, self.pain_model)    

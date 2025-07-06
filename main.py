@@ -3,6 +3,7 @@ from discord.ext import commands
 from discord import app_commands
 import logging
 import asyncio
+
 import helper_funcs
 import WeatherHandler
 
@@ -18,7 +19,9 @@ intents.message_content=True
 intents.members=True
 
 bot = commands.Bot(command_prefix='!', intents=intents)
+followup_task: asyncio.Task | None = None
 emojis = ["0️⃣", "1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
+
 
 class PainLevelSelect(discord.ui.Select):
     def __init__(self): 
@@ -40,8 +43,8 @@ class PainLevelView(discord.ui.View) :
 
 @bot.event
 async def on_ready(): 
-    print(f"{bot.user.name} LOADED")
     await bot.tree.sync(guild=guild_id)
+    print(f"{bot.user.name} LOADED")
 
 @bot.tree.command(name="local", description="Set location parameters", guild=guild_id)
 @app_commands.describe(zip_or_city="Zipcode / City to use for joint and weather forecasts", country = "Country to use for joint and weather forecasts")
@@ -82,8 +85,8 @@ async def send_followup(interaction, painlevel) :
     medium = 4
     
     wait_hours = {
-        high:2,
-        medium:4
+        high:10,
+        medium:20
     }
     
     if painlevel >= high : 
@@ -93,9 +96,8 @@ async def send_followup(interaction, painlevel) :
     else : #painlevel == low -> no followup
         return
 
-    await interaction.followup.send(f"✅ - Follow up will be sent in {emojis[hours]} hours", ephemeral=True)
-    await asyncio.sleep(1) #DELETE LATER
-    #await asyncio.sleep(hours * 60 * 60) #actual wait time
+    await interaction.followup.send(f"✅ - Follow up will be sent in {hours} hours", ephemeral=True)
+    await asyncio.sleep(hours * 60 * 60) #actual wait time
 
     await interaction.followup.send(f"👩🏻‍⚕️ - How are you feeling now? 🤒 {interaction.user.mention}", view=PainLevelView()) 
 
@@ -106,13 +108,34 @@ async def pain (interaction: discord.Interaction, pain_level: int) :
     await handle_pain(interaction, pain_level)
 
 
-@bot.tree.command(name="check", description="Displays next week's max forecasted pain level", guild=guild_id)
-async def pain (interaction: discord.Interaction) : 
+@bot.tree.command(name="updatemodel", description="Update model - consider doing when R2 and MSE look good.", guild=guild_id)
+async def update_model(interaction: discord.Interaction) :
+    before = get_forecast()
+    weatherBot.update_model()
+    after = get_forecast()
+    await interaction.response.send_message(f"\n**__BEFORE__** :{before}**__AFTER__** :{after}")
+
+
+@bot.tree.command(name="stats", description="Testing stats for current actuals", guild=guild_id)
+async def stats (interaction: discord.Interaction) :
+    stats = weatherBot.see_stats()
+    msg = "\n```\n"
+    for key,value in stats.items() : 
+        msg += f"{key} : {value}\n"
+    msg += "```"
+    await interaction.response.send_message(msg)
+
+def get_forecast() : 
     forecast = weatherBot.get_forecast()
     msg = "\n**Pain Forecast - Next Week:**\n```"    
     for date, maxpain in forecast.items() :
         msg += f"{date} : {emojis[maxpain]}\n"
     msg += "```"
+    return msg
+
+@bot.tree.command(name="forecast", description="Displays next week's max forecasted pain level", guild=guild_id)
+async def forecast (interaction: discord.Interaction) : 
+    msg = str(get_forecast())
     await interaction.response.send_message(msg)
 
 async def handle_pain(interaction: discord.Interaction, pain_level: int) : 
@@ -123,6 +146,11 @@ async def handle_pain(interaction: discord.Interaction, pain_level: int) :
         if pain_level < 0 or pain_level > 10 :
             await interaction.response.send_message("❌ - Invalid pain level, try again.")
         else :
+            global followup_task
+            if followup_task and not followup_task.done() : 
+                followup_task.cancel()
+                
+            
             timezone = helper_funcs.get_config()['timezone']
             now = helper_funcs.get_time(timezone)
             date = now.date()
@@ -132,7 +160,7 @@ async def handle_pain(interaction: discord.Interaction, pain_level: int) :
             await interaction.response.send_message(f"🤕 - Pain level of {emojis[pain_level]} recorded at {str(date)} {str(hour)}:{str(minute)} by {interaction.user.mention}")
             
             weatherBot.log_pain(pain_log, pain_level)
-            bot.loop.create_task(send_followup(interaction, pain_level))
+            followup_task = asyncio.create_task(send_followup(interaction, pain_level))
 
 
 bot.run(token,log_handler=handler, log_level=logging.DEBUG)
