@@ -19,6 +19,8 @@ A personalized machine learning system that forecasts joint pain using user feed
 - **Data & ML**: pandas, scikit‑learn, joblib  
 - **Geocoding & Weather API**: Open‑Meteo  
 
+---
+
 ### How-To
 
 1. **Clone the repo** (excluding `data.csv` and `pain_model.pkl`)

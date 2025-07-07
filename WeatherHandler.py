@@ -257,7 +257,7 @@ class WeatherHandler:
         if hour == hour :
             self.intraday_routine(now_ts)
         # # day just ended - update actuals for prev day & get forecast for next week
-        if hour == hour :
+        if hour == 0 :
             yesterday = now_ts - timedelta(days=1)
             next_week = now_ts + timedelta(days=7)
             self.forecast_routine(yesterday, now_ts, next_week)
